@@ -19,12 +19,15 @@
 #define MSGPACK_EMBED_STACK_SIZE  (1024)
 #include "unpack_define.h"
 
+typedef PyObject* (*extptr)(int, const char *pos, unsigned int);
+
 typedef struct unpack_user {
     int use_list;
     PyObject *object_hook;
     bool has_pairs_hook;
     PyObject *list_hook;
     PyObject *ext_hook;
+    extptr ext_hook_c;
     const char *encoding;
     const char *unicode_errors;
     Py_ssize_t max_str_len, max_bin_len, max_array_len, max_map_len, max_ext_len;
@@ -263,12 +266,16 @@ static inline int unpack_callback_ext(unpack_user* u, const char* base, const ch
         PyErr_Format(PyExc_ValueError, "%u exceeds max_ext_len(%zd)", length, u->max_ext_len);
         return -1;
     }
+
     // length also includes the typecode, so the actual data is length-1
-#if PY_MAJOR_VERSION == 2
+/*#if PY_MAJOR_VERSION == 2
     py = PyObject_CallFunction(u->ext_hook, "(is#)", (int)typecode, pos, (Py_ssize_t)length-1);
 #else
     py = PyObject_CallFunction(u->ext_hook, "(iy#)", (int)typecode, pos, (Py_ssize_t)length-1);
-#endif
+#endif*/
+
+    py = u->ext_hook_c(typecode, pos, length-1);
+
     if (!py)
         return -1;
     *o = py;

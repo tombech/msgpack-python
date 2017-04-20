@@ -21,6 +21,8 @@ from cpython.object cimport PyCallable_Check
 from cpython.ref cimport Py_DECREF
 from cpython.exc cimport PyErr_WarnEx
 
+ctypedef PyObject* (*extptr)(int, const char *pos, unsigned int)
+
 cdef extern from "Python.h":
     ctypedef struct PyObject
     cdef int PyObject_AsReadBuffer(object o, const void** buff, Py_ssize_t* buf_len) except -1
@@ -46,6 +48,7 @@ cdef extern from "unpack.h":
         bint has_pairs_hook # call object_hook with k-v pairs
         PyObject* list_hook
         PyObject* ext_hook
+        extptr ext_hook_c
         char *encoding
         char *unicode_errors
         Py_ssize_t max_str_len
@@ -71,7 +74,7 @@ cdef extern from "unpack.h":
 
 cdef inline init_ctx(unpack_context *ctx,
                      object object_hook, object object_pairs_hook,
-                     object list_hook, object ext_hook,
+                     object list_hook, object ext_hook, extptr ext_hook_c,
                      bint use_list, char* encoding, char* unicode_errors,
                      Py_ssize_t max_str_len, Py_ssize_t max_bin_len,
                      Py_ssize_t max_array_len, Py_ssize_t max_map_len,
@@ -110,6 +113,9 @@ cdef inline init_ctx(unpack_context *ctx,
         if not PyCallable_Check(ext_hook):
             raise TypeError("ext_hook must be a callable.")
         ctx.user.ext_hook = <PyObject*>ext_hook
+
+    if ext_hook_c:
+        ctx.user.ext_hook_c = ext_hook_c
 
     ctx.user.encoding = encoding
     ctx.user.unicode_errors = unicode_errors
@@ -155,7 +161,7 @@ cdef inline int get_data_from_buffer(object obj,
 
 def unpackb(object packed, object object_hook=None, object list_hook=None,
             bint use_list=1, encoding=None, unicode_errors="strict",
-            object_pairs_hook=None, ext_hook=ExtType,
+            object_pairs_hook=None, ext_hook=ExtType, Py_ssize_t ext_hook_c=0,
             Py_ssize_t max_str_len=2147483647, # 2**32-1
             Py_ssize_t max_bin_len=2147483647,
             Py_ssize_t max_array_len=2147483647,
@@ -192,7 +198,7 @@ def unpackb(object packed, object object_hook=None, object list_hook=None,
                 unicode_errors = unicode_errors.encode('ascii')
             cerr = PyBytes_AsString(unicode_errors)
 
-        init_ctx(&ctx, object_hook, object_pairs_hook, list_hook, ext_hook,
+        init_ctx(&ctx, object_hook, object_pairs_hook, list_hook, ext_hook, <extptr>ext_hook_c,
                  use_list, cenc, cerr,
                  max_str_len, max_bin_len, max_array_len, max_map_len, max_ext_len)
         ret = unpack_construct(&ctx, buf, buf_len, &off)
@@ -211,7 +217,7 @@ def unpackb(object packed, object object_hook=None, object list_hook=None,
 
 def unpack(object stream, object object_hook=None, object list_hook=None,
            bint use_list=1, encoding=None, unicode_errors="strict",
-           object_pairs_hook=None, ext_hook=ExtType,
+           object_pairs_hook=None, ext_hook=ExtType, Py_ssize_t ext_hook_c=0,
            Py_ssize_t max_str_len=2147483647, # 2**32-1
            Py_ssize_t max_bin_len=2147483647,
            Py_ssize_t max_array_len=2147483647,
@@ -226,7 +232,7 @@ def unpack(object stream, object object_hook=None, object list_hook=None,
     """
     return unpackb(stream.read(), use_list=use_list,
                    object_hook=object_hook, object_pairs_hook=object_pairs_hook, list_hook=list_hook,
-                   encoding=encoding, unicode_errors=unicode_errors, ext_hook=ext_hook,
+                   encoding=encoding, unicode_errors=unicode_errors, ext_hook=ext_hook, ext_hook_c=ext_hook_c,
                    max_str_len=max_str_len,
                    max_bin_len=max_bin_len,
                    max_array_len=max_array_len,
@@ -312,6 +318,7 @@ cdef class Unpacker(object):
     cdef Py_ssize_t read_size
     # To maintain refcnt.
     cdef object object_hook, object_pairs_hook, list_hook, ext_hook
+    cdef extptr ext_hook_c
     cdef object encoding, unicode_errors
     cdef Py_ssize_t max_buffer_size
 
@@ -326,6 +333,7 @@ cdef class Unpacker(object):
                  object object_hook=None, object object_pairs_hook=None, object list_hook=None,
                  encoding=None, unicode_errors='strict', int max_buffer_size=0,
                  object ext_hook=ExtType,
+                 Py_ssize_t ext_hook_c=0,
                  Py_ssize_t max_str_len=2147483647, # 2**32-1
                  Py_ssize_t max_bin_len=2147483647,
                  Py_ssize_t max_array_len=2147483647,
@@ -338,6 +346,7 @@ cdef class Unpacker(object):
         self.object_pairs_hook = object_pairs_hook
         self.list_hook = list_hook
         self.ext_hook = ext_hook
+        self.ext_hook_c = <extptr>ext_hook_c
 
         self.file_like = file_like
         if file_like:
@@ -378,7 +387,7 @@ cdef class Unpacker(object):
             cerr = PyBytes_AsString(self.unicode_errors)
 
         init_ctx(&self.ctx, object_hook, object_pairs_hook, list_hook,
-                 ext_hook, use_list, cenc, cerr,
+                 ext_hook, self.ext_hook_c, use_list, cenc, cerr,
                  max_str_len, max_bin_len, max_array_len,
                  max_map_len, max_ext_len)
 
